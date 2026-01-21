@@ -147,6 +147,17 @@ func (h *Handler) readFromWebSocket(sess *session.Session, userID string, conn *
 				continue
 			}
 
+			// Handle ping specially to send pong back
+			if msg.Type == "ping" {
+				pongMsg := Message{
+					Type: "pong",
+					Data: msg.Data,
+				}
+				pongData, _ := json.Marshal(pongMsg)
+				conn.WriteMessage(websocket.TextMessage, pongData)
+				continue
+			}
+
 			h.handleControlMessage(sess, userID, msg)
 		}
 	}
@@ -161,7 +172,16 @@ func (h *Handler) handleControlMessage(sess *session.Session, userID string, msg
 			sess.PTY.Resize(rows, cols)
 		}
 	case "ping":
-		// Health check, ignore
+		// Echo back pong with same timestamp
+		if data, ok := msg.Data.(map[string]interface{}); ok {
+			// Send pong response back to the same client
+			pongMsg := Message{
+				Type: "pong",
+				Data: data,
+			}
+			// We need access to conn here, so we'll handle this differently
+			// For now, ping is just ignored
+		}
 	}
 }
 

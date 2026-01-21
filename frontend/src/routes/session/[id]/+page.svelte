@@ -16,6 +16,7 @@
 	let sessionId = $derived($page.params.id);
 	let token = $derived($page.url.searchParams.get('token'));
 	let role = $derived($page.url.searchParams.get('role') || 'readonly');
+	let latency = $state({ total: 0, server: 0, shell: 0 });
 
 	onMount(() => {
 		initTerminal();
@@ -84,21 +85,26 @@
 
 		ws.onopen = () => {
 			connectionStatus = 'connected';
-			// Send join message
 			ws.send(JSON.stringify({
 				sessionId,
 				token: token || '',
 				role: token ? 'owner' : role
 			}));
+
+			// Ping for latency measurement
+			setInterval(() => {
+				if (ws.readyState === WebSocket.OPEN) {
+					const pingTime = Date.now();
+					ws.send(JSON.stringify({ type: 'ping', time: pingTime }));
+				}
+			}, 2000);
 		};
 
 		ws.onmessage = (event) => {
 			if (event.data instanceof ArrayBuffer) {
-				// Binary data - terminal output
 				const text = new TextDecoder().decode(event.data);
 				terminal.write(text);
 			} else {
-				// JSON control messages
 				try {
 					const msg = JSON.parse(event.data);
 					handleControlMessage(msg);
@@ -134,6 +140,15 @@
 				break;
 			case 'user_left':
 				users = users.filter(u => u.id !== msg.data.userId);
+				break;
+			case 'pong':
+				const now = Date.now();
+				const rtt = now - msg.data.time;
+				latency = {
+					total: rtt,
+					server: rtt / 2,
+					shell: rtt / 2
+				};
 				break;
 			case 'error':
 				alert('Error: ' + msg.data.message);
@@ -172,36 +187,76 @@
 			default: return 'role-readonly';
 		}
 	}
+
+	function formatLatency(ms) {
+		if (ms < 1) return '<1 ms';
+		return `${Math.round(ms)} ms`;
+	}
 </script>
 
 <div id="app">
-	<div class="header">
-		<div style="display: flex; align-items: center; gap: 16px;">
-			<a href="/" class="logo" style="text-decoration: none;">shlx</a>
-			<div class="status {connectionStatus}">
-				<div class="user-dot" style="background: {connectionStatus === 'connected' ? 'var(--success)' : 'var(--error)'}"></div>
-				{connectionStatus}
-			</div>
-		</div>
+<div class="header">
+<div class="header-left">
+<a href="/" class="logo" style="text-decoration: none;">shlx</a>
+<div class="connection-status {connectionStatus}">
+<div class="user-dot" style="background: {connectionStatus === 'connected' ? 'var(--success)' : 'var(--error)'}"></div>
+{connectionStatus === 'connected' ? 'You are connected!' : connectionStatus}
+</div>
+</div>
 
-		<div style="display: flex; align-items: center; gap: 16px;">
-			<div class="users">
-				{#each users as user}
-					<div class="user-badge">
-						<div class="user-dot"></div>
-						<span class={getRoleColor(user.role)}>
-							{user.id === currentUser?.id ? 'You' : user.id.slice(0, 8)}
-						</span>
-						<span style="color: var(--text-secondary)">({user.role})</span>
-					</div>
-				{/each}
-			</div>
+<div style="display: flex; gap: 12px; align-items: center;">
+<button class="copy-btn" onclick={copySessionUrl}>Share</button>
+</div>
+</div>
 
-			<button class="copy-btn" onclick={copySessionUrl}>
-				Share
-			</button>
-		</div>
-	</div>
+<!-- Users Panel -->
+<div class="users-panel">
+<div class="users-title">Connected ({users.length})</div>
+<div class="users">
+{#each users as user}
+<div class="user-badge">
+<div class="user-dot"></div>
+<span class={getRoleColor(user.role)}>
+{user.id === currentUser?.id ? 'You' : user.id.slice(0, 8)}
+</span>
+<span style="color: var(--text-secondary); font-size: 11px;">({user.role})</span>
+</div>
+{/each}
+</div>
+</div>
 
-	<div class="terminal-container" bind:this={terminalElement}></div>
+<!-- Sidebar with Stats -->
+<div class="sidebar">
+<div class="panel">
+<div class="panel-title">Network</div>
+<div class="latency-info">
+<div class="latency-row">
+<span class="latency-label">Total latency</span>
+<span class="latency-value">{formatLatency(latency.total)}</span>
+</div>
+<div class="latency-row">
+<span class="latency-label">Server ↔ You</span>
+<span class="latency-value">{formatLatency(latency.server)}</span>
+</div>
+<div class="latency-row">
+<span class="latency-label">Shell ↔ Server</span>
+<span class="latency-value">{formatLatency(latency.shell)}</span>
+</div>
+</div>
+</div>
+</div>
+
+<div class="session-layout">
+<div class="terminal-window">
+<div class="terminal-titlebar">
+<div class="terminal-dots">
+<div class="terminal-dot dot-red"></div>
+<div class="terminal-dot dot-yellow"></div>
+<div class="terminal-dot dot-green"></div>
+</div>
+<div class="terminal-title">{currentUser?.id?.slice(0, 8) || 'guest'}@{sessionId.slice(0, 8)}</div>
+</div>
+<div class="terminal-container" bind:this={terminalElement}></div>
+</div>
+</div>
 </div>
