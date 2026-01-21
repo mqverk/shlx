@@ -17,14 +17,19 @@
 	let token = $derived($page.url.searchParams.get('token'));
 	let role = $derived($page.url.searchParams.get('role') || 'readonly');
 	let latency = $state({ total: 0, server: 0, shell: 0 });
+	let showUsers = $state(true);
+	let showNetwork = $state(true);
+	let terminalSize = $state({ width: 900, height: 600 });
+	let isResizing = $state(false);
+	let resizeEdge = $state(null);
 
 	onMount(() => {
 		initTerminal();
 		connectWebSocket();
 
-		window.addEventListener('resize', handleResize);
+		window.addEventListener('resize', handleWindowResize);
 		return () => {
-			window.removeEventListener('resize', handleResize);
+			window.removeEventListener('resize', handleWindowResize);
 		};
 	});
 
@@ -156,7 +161,7 @@
 		}
 	}
 
-	function handleResize() {
+	function handleWindowResize() {
 		if (fitAddon) {
 			fitAddon.fit();
 			sendResize();
@@ -192,6 +197,62 @@
 		if (ms < 1) return '<1 ms';
 		return `${Math.round(ms)} ms`;
 	}
+
+	function toggleUsers() {
+		showUsers = !showUsers;
+	}
+
+	function toggleNetwork() {
+		showNetwork = !showNetwork;
+	}
+
+	function startResize(edge, event) {
+		isResizing = true;
+		resizeEdge = edge;
+		event.preventDefault();
+		document.addEventListener('mousemove', handleResize);
+		document.addEventListener('mouseup', stopResize);
+	}
+
+	function handleResize(event) {
+		if (!isResizing || !resizeEdge) return;
+
+		const container = document.querySelector('.terminal-window');
+		if (!container) return;
+
+		const rect = container.getBoundingClientRect();
+
+		if (resizeEdge.includes('e')) {
+			const newWidth = event.clientX - rect.left;
+			terminalSize.width = Math.max(400, Math.min(1600, newWidth));
+		}
+		if (resizeEdge.includes('w')) {
+			const newWidth = rect.right - event.clientX;
+			terminalSize.width = Math.max(400, Math.min(1600, newWidth));
+		}
+		if (resizeEdge.includes('s')) {
+			const newHeight = event.clientY - rect.top;
+			terminalSize.height = Math.max(300, Math.min(1000, newHeight));
+		}
+		if (resizeEdge.includes('n')) {
+			const newHeight = rect.bottom - event.clientY;
+			terminalSize.height = Math.max(300, Math.min(1000, newHeight));
+		}
+
+		if (fitAddon && terminal) {
+			setTimeout(() => {
+				fitAddon.fit();
+				sendResize();
+			}, 0);
+		}
+	}
+
+	function stopResize() {
+		isResizing = false;
+		resizeEdge = null;
+		document.removeEventListener('mousemove', handleResize);
+		document.removeEventListener('mouseup', stopResize);
+	}
 </script>
 
 <div id="app">
@@ -205,58 +266,85 @@
 </div>
 
 <div style="display: flex; gap: 12px; align-items: center;">
-<button class="copy-btn" onclick={copySessionUrl}>Share</button>
-</div>
-</div>
+			<button class="icon-btn" onclick={toggleUsers} title="Toggle Users" style="background: {showUsers ? 'var(--bg-tertiary)' : 'transparent'}">
+				<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+					<circle cx="9" cy="7" r="4"></circle>
+					<path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+					<path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+				</svg>
+			</button>
+			<button class="icon-btn" onclick={toggleNetwork} title="Toggle Network Stats" style="background: {showNetwork ? 'var(--bg-tertiary)' : 'transparent'}">
+				<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+				</svg>
+			</button>
+			<button class="copy-btn" onclick={copySessionUrl}>Share</button>
+		</div>
+	</div>
 
-<!-- Users Panel -->
-<div class="users-panel">
-<div class="users-title">Connected ({users.length})</div>
-<div class="users">
-{#each users as user}
-<div class="user-badge">
-<div class="user-dot"></div>
-<span class={getRoleColor(user.role)}>
-{user.id === currentUser?.id ? 'You' : user.id.slice(0, 8)}
-</span>
-<span style="color: var(--text-secondary); font-size: 11px;">({user.role})</span>
-</div>
-{/each}
-</div>
-</div>
+	<!-- Users Panel -->
+	{#if showUsers}
+		<div class="users-panel">
+			<div class="users-title">Connected ({users.length})</div>
+			<div class="users">
+				{#each users as user}
+					<div class="user-badge">
+						<div class="user-dot"></div>
+						<span class={getRoleColor(user.role)}>
+							{user.id === currentUser?.id ? 'You' : user.id.slice(0, 8)}
+						</span>
+						<span style="color: var(--text-secondary); font-size: 11px;">({user.role})</span>
+					</div>
+				{/each}
+			</div>
+		</div>
+	{/if}
 
-<!-- Sidebar with Stats -->
-<div class="sidebar">
-<div class="panel">
-<div class="panel-title">Network</div>
-<div class="latency-info">
-<div class="latency-row">
-<span class="latency-label">Total latency</span>
-<span class="latency-value">{formatLatency(latency.total)}</span>
-</div>
-<div class="latency-row">
-<span class="latency-label">Server ↔ You</span>
-<span class="latency-value">{formatLatency(latency.server)}</span>
-</div>
-<div class="latency-row">
-<span class="latency-label">Shell ↔ Server</span>
-<span class="latency-value">{formatLatency(latency.shell)}</span>
-</div>
-</div>
-</div>
-</div>
+	<!-- Sidebar with Stats -->
+	{#if showNetwork}
+		<div class="sidebar">
+			<div class="panel">
+				<div class="panel-title">Network</div>
+				<div class="latency-info">
+					<div class="latency-row">
+						<span class="latency-label">Total latency</span>
+						<span class="latency-value">{formatLatency(latency.total)}</span>
+					</div>
+					<div class="latency-row">
+						<span class="latency-label">Server ↔ You</span>
+						<span class="latency-value">{formatLatency(latency.server)}</span>
+					</div>
+					<div class="latency-row">
+						<span class="latency-label">Shell ↔ Server</span>
+						<span class="latency-value">{formatLatency(latency.shell)}</span>
+					</div>
+				</div>
+			</div>
+		</div>
+	{/if}
 
-<div class="session-layout">
-<div class="terminal-window">
-<div class="terminal-titlebar">
-<div class="terminal-dots">
-<div class="terminal-dot dot-red"></div>
-<div class="terminal-dot dot-yellow"></div>
-<div class="terminal-dot dot-green"></div>
-</div>
-<div class="terminal-title">{currentUser?.id?.slice(0, 8) || 'guest'}@{sessionId.slice(0, 8)}</div>
-</div>
-<div class="terminal-container" bind:this={terminalElement}></div>
-</div>
-</div>
+	<div class="session-layout">
+		<div class="terminal-window" style="width: {terminalSize.width}px; height: {terminalSize.height}px; position: relative;">
+			<!-- Resize handles -->
+			<div class="resize-handle resize-n" onmousedown={(e) => startResize('n', e)}></div>
+			<div class="resize-handle resize-s" onmousedown={(e) => startResize('s', e)}></div>
+			<div class="resize-handle resize-e" onmousedown={(e) => startResize('e', e)}></div>
+			<div class="resize-handle resize-w" onmousedown={(e) => startResize('w', e)}></div>
+			<div class="resize-handle resize-ne" onmousedown={(e) => startResize('ne', e)}></div>
+			<div class="resize-handle resize-nw" onmousedown={(e) => startResize('nw', e)}></div>
+			<div class="resize-handle resize-se" onmousedown={(e) => startResize('se', e)}></div>
+			<div class="resize-handle resize-sw" onmousedown={(e) => startResize('sw', e)}></div>
+
+			<div class="terminal-titlebar">
+				<div class="terminal-dots">
+					<div class="terminal-dot dot-red"></div>
+					<div class="terminal-dot dot-yellow"></div>
+					<div class="terminal-dot dot-green"></div>
+				</div>
+				<div class="terminal-title">{currentUser?.id?.slice(0, 8) || 'guest'}@{sessionId.slice(0, 8)}</div>
+			</div>
+			<div class="terminal-container" bind:this={terminalElement}></div>
+		</div>
+	</div>
 </div>
