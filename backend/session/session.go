@@ -19,6 +19,7 @@ const (
 // User represents a connected client
 type User struct {
 	ID        string
+	Name      string
 	Role      Role
 	WriteChan chan []byte
 	Connected time.Time
@@ -95,13 +96,17 @@ func (m *Manager) DeleteSession(id string) {
 }
 
 // AddUser adds a user to the session
-func (s *Session) AddUser(role Role) (*User, string) {
+func (s *Session) AddUser(role Role, name string) (*User, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	userID := uuid.New().String()
+	if name == "" {
+		name = "Guest"
+	}
 	user := &User{
 		ID:        userID,
+		Name:      name,
 		Role:      role,
 		WriteChan: make(chan []byte, 256),
 		Connected: time.Now(),
@@ -163,6 +168,7 @@ func (s *Session) GetUsers() []UserInfo {
 	for _, u := range s.Users {
 		users = append(users, UserInfo{
 			ID:   u.ID,
+			Name: u.Name,
 			Role: string(u.Role),
 		})
 	}
@@ -187,14 +193,15 @@ func (s *Session) CloseAll() {
 // UserInfo is a serializable user representation
 type UserInfo struct {
 	ID   string `json:"id"`
+	Name string `json:"name"`
 	Role string `json:"role"`
 }
 
 // Errors
 var (
-	ErrUserNotFound      = &Error{"user not found"}
-	ErrPermissionDenied  = &Error{"permission denied"}
-	ErrSessionNotFound   = &Error{"session not found"}
+	ErrUserNotFound     = &Error{"user not found"}
+	ErrPermissionDenied = &Error{"permission denied"}
+	ErrSessionNotFound  = &Error{"session not found"}
 )
 
 type Error struct {

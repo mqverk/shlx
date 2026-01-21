@@ -20,13 +20,23 @@
 	let showUsers = $state(true);
 	let showNetwork = $state(true);
 	let terminalSize = $state({ width: 900, height: 600 });
+	let terminalPosition = $state({ x: 0, y: 0 });
 	let isResizing = $state(false);
 	let resizeEdge = $state(null);
+	let isDragging = $state(false);
+	let dragStart = $state({ x: 0, y: 0 });
+	let showNamePrompt = $state(true);
+	let userName = $state('');
+	let userNameInput = $state('');
 
 	onMount(() => {
-		initTerminal();
-		connectWebSocket();
+		// Center terminal initially
+		const centerX = (window.innerWidth - terminalSize.width) / 2;
+		const centerY = (window.innerHeight - terminalSize.height) / 2 - 50; // -50 for header
+		terminalPosition = { x: Math.max(0, centerX), y: Math.max(0, centerY) };
 
+		initTerminal();
+		
 		window.addEventListener('resize', handleWindowResize);
 		return () => {
 			window.removeEventListener('resize', handleWindowResize);
@@ -93,12 +103,13 @@
 			ws.send(JSON.stringify({
 				sessionId,
 				token: token || '',
-				role: token ? 'owner' : role
+				role: token ? 'owner' : role,
+				name: userName || 'Guest'
 			}));
 
-			// Ping for latency measurement
+			// Start ping interval
 			setInterval(() => {
-				if (ws.readyState === WebSocket.OPEN) {
+				if (ws && ws.readyState === WebSocket.OPEN) {
 					const pingTime = Date.now();
 					ws.send(JSON.stringify({ type: 'ping', time: pingTime }));
 				}
@@ -135,13 +146,18 @@
 			case 'welcome':
 				currentUser = {
 					id: msg.data.userId,
-					role: msg.data.role
+					role: msg.data.role,
+					name: msg.data.name || 'Guest'
 				};
 				users = msg.data.users || [];
 				sendResize();
 				break;
 			case 'user_joined':
-				users = [...users, { id: msg.data.userId, role: msg.data.role }];
+				users = [...users, { 
+					id: msg.data.userId, 
+					role: msg.data.role,
+					name: msg.data.name || 'Guest'
+				}];
 				break;
 			case 'user_left':
 				users = users.filter(u => u.id !== msg.data.userId);
@@ -253,6 +269,46 @@
 		document.removeEventListener('mousemove', handleResize);
 		document.removeEventListener('mouseup', stopResize);
 	}
+
+	function startDrag(event) {
+		if (event.target.closest('.terminal-dots')) return;
+		isDragging = true;
+		dragStart = {
+			x: event.clientX - terminalPosition.x,
+			y: event.clientY - terminalPosition.y
+		};
+		event.preventDefault();
+		document.addEventListener('mousemove', handleDrag);
+		document.addEventListener('mouseup', stopDrag);
+	}
+
+	function handleDrag(event) {
+		if (!isDragging) return;
+		terminalPosition = {
+			x: event.clientX - dragStart.x,
+			y: event.clientY - dragStart.y
+		};
+	}
+
+	function stopDrag() {
+		isDragging = false;
+		document.removeEventListener('mousemove', handleDrag);
+		document.removeEventListener('mouseup', stopDrag);
+	}
+
+	function submitName() {
+		if (userNameInput.trim()) {
+			userName = userNameInput.trim();
+			showNamePrompt = false;
+			connectWebSocket();
+		}
+	}
+
+	function skipName() {
+		userName = 'Guest';
+		showNamePrompt = false;
+		connectWebSocket();
+	}
 </script>
 
 <div id="app">
@@ -292,7 +348,7 @@
 					<div class="user-badge">
 						<div class="user-dot"></div>
 						<span class={getRoleColor(user.role)}>
-							{user.id === currentUser?.id ? 'You' : user.id.slice(0, 8)}
+							{user.id === currentUser?.id ? (currentUser?.name || 'You') : (user.name || 'Guest')}
 						</span>
 						<span style="color: var(--text-secondary); font-size: 11px;">({user.role})</span>
 					</div>
@@ -325,7 +381,7 @@
 	{/if}
 
 	<div class="session-layout">
-		<div class="terminal-window" style="width: {terminalSize.width}px; height: {terminalSize.height}px; position: relative;">
+		<div class="terminal-window" style="width: {terminalSize.width}px; height: {terminalSize.height}px; position: absolute; left: {terminalPosition.x}px; top: {terminalPosition.y}px; cursor: {isDragging ? 'grabbing' : 'default'};">
 			<!-- Resize handles -->
 			<div class="resize-handle resize-n" onmousedown={(e) => startResize('n', e)}></div>
 			<div class="resize-handle resize-s" onmousedown={(e) => startResize('s', e)}></div>
@@ -336,15 +392,37 @@
 			<div class="resize-handle resize-se" onmousedown={(e) => startResize('se', e)}></div>
 			<div class="resize-handle resize-sw" onmousedown={(e) => startResize('sw', e)}></div>
 
-			<div class="terminal-titlebar">
+			<div class="terminal-titlebar" onmousedown={startDrag} style="cursor: {isDragging ? 'grabbing' : 'grab'};">
 				<div class="terminal-dots">
 					<div class="terminal-dot dot-red"></div>
 					<div class="terminal-dot dot-yellow"></div>
 					<div class="terminal-dot dot-green"></div>
 				</div>
-				<div class="terminal-title">{currentUser?.id?.slice(0, 8) || 'guest'}@{sessionId.slice(0, 8)}</div>
+				<div class="terminal-title">{currentUser?.name || userName || 'Guest'}@{sessionId.slice(0, 8)}</div>
 			</div>
 			<div class="terminal-container" bind:this={terminalElement}></div>
 		</div>
 	</div>
+
+	<!-- Name Prompt Modal -->
+	{#if showNamePrompt}
+		<div class="modal-overlay">
+			<div class="modal">
+				<h2>Welcome to shlx!</h2>
+				<p>Choose a display name for this session:</p>
+				<input 
+					type="text" 
+					bind:value={userNameInput} 
+					placeholder="Enter your name" 
+					onkeydown={(e) => e.key === 'Enter' && submitName()}
+					autofocus
+					style="margin: 16px 0;"
+				/>
+				<div class="button-group">
+					<button onclick={submitName} disabled={!userNameInput.trim()}>Join</button>
+					<button onclick={skipName} style="background: var(--bg-tertiary);">Skip</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 </div>

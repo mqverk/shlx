@@ -66,7 +66,13 @@ func (h *Handler) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		role = session.RoleInteractive
 	}
 
-	user, userID := sess.AddUser(role)
+	// Get user name
+	userName := joinMsg.Name
+	if userName == "" {
+		userName = "Guest"
+	}
+
+	user, userID := sess.AddUser(role, userName)
 	defer sess.RemoveUser(userID)
 
 	// Send welcome message with user info
@@ -75,6 +81,7 @@ func (h *Handler) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		Data: map[string]interface{}{
 			"userId":    userID,
 			"role":      role,
+			"name":      userName,
 			"sessionId": sess.ID,
 			"users":     sess.GetUsers(),
 		},
@@ -85,6 +92,7 @@ func (h *Handler) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		Type: "user_joined",
 		Data: map[string]interface{}{
 			"userId": userID,
+			"name":   userName,
 			"role":   role,
 		},
 	}))
@@ -171,17 +179,6 @@ func (h *Handler) handleControlMessage(sess *session.Session, userID string, msg
 			cols := uint16(data["cols"].(float64))
 			sess.PTY.Resize(rows, cols)
 		}
-	case "ping":
-		// Echo back pong with same timestamp
-		if data, ok := msg.Data.(map[string]interface{}); ok {
-			// Send pong response back to the same client
-			pongMsg := Message{
-				Type: "pong",
-				Data: data,
-			}
-			// We need access to conn here, so we'll handle this differently
-			// For now, ping is just ignored
-		}
 	}
 }
 
@@ -211,5 +208,6 @@ type Message struct {
 type JoinMessage struct {
 	SessionID string `json:"sessionId"`
 	Token     string `json:"token"`
+	Name      string `json:"name"`
 	Role      string `json:"role"`
 }
