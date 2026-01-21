@@ -37,7 +37,8 @@ Fast, collaborative live terminal sharing tool built with Go and SvelteKit.
 
 1. **Clone and navigate to the project:**
 ```bash
-cd /home/mqverk/Projects/shlx
+git clone https://github.com/mqverk/shlx.git
+cd shlx
 ```
 
 2. **Install Go dependencies:**

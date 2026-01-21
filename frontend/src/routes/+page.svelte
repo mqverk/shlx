@@ -9,6 +9,9 @@
 		creating = true;
 		try {
 			const res = await fetch('/api/create', { method: 'POST' });
+			if (!res.ok) {
+				throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+			}
 			const data = await res.json();
 			sessionInfo = data;
 		} catch (e) {
